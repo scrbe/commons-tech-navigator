@@ -18,13 +18,11 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import SendIcon from '@mui/icons-material/Send';
 
-// Placeholder suggested questions — final copy to be provided by Design Director
-// before academic partner session (flagged to Santi in SAN-27 summary).
+// Suggested questions sourced from design-vision-2026-03-25.md (Design Director).
 const SUGGESTED_QUESTIONS = [
-  "We're introducing GPS-based monitoring to a community fishery. What governance risks should we anticipate?",
-  'A water users association is adopting sensor-based irrigation scheduling. How has technology typically shifted authority in similar cases?',
-  'Our project involves a digital marketplace for a forest commons. What contestation patterns have emerged in comparable situations?',
-  'A protected area is deploying remote sensing to monitor resource use. What authority dynamics should we expect between the state and local communities?',
+  'What governance risks should I consider for a sensor network in an irrigation collective?',
+  'Are there cases where technology undermined community autonomy in fisheries management?',
+  'What does the evidence say about mobile data collection in indigenous land management?',
 ];
 
 export default function ChatPage() {
