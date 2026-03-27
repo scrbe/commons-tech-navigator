@@ -1,19 +1,7 @@
-// Placeholder page — replaced by the full chat layout in SAN-27.
-// Confirms the scaffold is running correctly.
+import ChatPage from '@/components/ChatPage';
+
+// The chat page IS the product. ChatPage is a Client Component that owns
+// all layout and onboarding state. Streaming and message logic added in SAN-30.
 export default function Home() {
-  return (
-    <main
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        backgroundColor: '#FAFAFA',
-        color: '#1A1A1A',
-        fontFamily: 'Inter, Roboto, Helvetica, Arial, sans-serif',
-      }}
-    >
-      <p style={{ fontSize: '15px' }}>Commons Tech Navigator — scaffold running ✓</p>
-    </main>
-  );
+  return <ChatPage />;
 }
