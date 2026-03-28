@@ -5,15 +5,18 @@
 // State:
 //   useChat (from @ai-sdk/react) — messages, sendMessage, status
 //   inputValue (local) — controlled TextField value
+//   ratings (local) — Map<messageId, 'up'|'down'> for thumbs feedback (SAN-32)
 //
 // Agent responses are parsed and rendered by AgentMessage (SAN-31):
 //   [CASE_REF:] markers → CaseCitationCard components inline
 //   [SUGGESTED:] markers → plain text links that populate the input
 //
-// Thumbs up/down feedback controls are added in SAN-32.
+// Per-message feedback (SAN-32):
+//   x-trace-id header captured via useChat onResponse/onFinish callbacks.
+//   Thumbs up/down icons log a Langfuse score via POST /api/feedback.
 
 import { useChat } from '@ai-sdk/react';
-import { isTextUIPart } from 'ai';
+import { isTextUIPart, DefaultChatTransport } from 'ai';
 import { useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -24,6 +27,10 @@ import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import SendIcon from '@mui/icons-material/Send';
+import ThumbUpOutlinedIcon from '@mui/icons-material/ThumbUpOutlined';
+import ThumbDownOutlinedIcon from '@mui/icons-material/ThumbDownOutlined';
+import ThumbUpIcon from '@mui/icons-material/ThumbUp';
+import ThumbDownIcon from '@mui/icons-material/ThumbDown';
 import AgentMessage from './AgentMessage';
 
 // Suggested questions from ux-direction-core-chat-agent-2026-03-26.md (Design Director).
@@ -32,13 +39,49 @@ const SUGGESTED_QUESTIONS = [
   'What governance risks should I anticipate when introducing sensor-based water monitoring in an irrigator community with informal tenure arrangements?',
   'Are there cases where digital data collection undermined collective decision-making in fisheries or forest governance? What went wrong?',
   "We're advising an irrigation collective considering a shared IoT platform. What does the evidence say about technology ownership and control risks in similar settings?",
-  'What conditions have allowed technology to strengthen — rather than erode — community governance in CPR contexts? I\'m looking for patterns across cases.',
+  "What conditions have allowed technology to strengthen — rather than erode — community governance in CPR contexts? I'm looking for patterns across cases.",
 ];
 
 export default function ChatPage() {
-  const { messages, sendMessage, status } = useChat();
   const [inputValue, setInputValue] = useState('');
   const threadRef = useRef<HTMLDivElement>(null);
+
+  // SAN-32: trace ID tracking.
+  // pendingTraceIdRef holds the trace ID from the most recent response until
+  // onFinish fires with the final message ID — at which point we store the
+  // association in traceIdMapRef for the lifetime of the session.
+  const pendingTraceIdRef = useRef<string | null>(null);
+  const traceIdMapRef = useRef<Map<string, string>>(new Map());
+
+  // SAN-32: per-message ratings. Keyed by message ID.
+  const [ratings, setRatings] = useState<Map<string, 'up' | 'down'>>(new Map());
+
+  // DefaultChatTransport with a custom fetch that captures x-trace-id from the
+  // response headers before streaming begins. Stored in a ref so the transport
+  // instance is stable across renders (avoids re-subscribing on every render).
+  // The fetch closure captures pendingTraceIdRef by reference so it always
+  // writes to the current ref value.
+  const transportRef = useRef(
+    new DefaultChatTransport({
+      fetch: async (input, init) => {
+        const response = await globalThis.fetch(input, init as RequestInit);
+        const traceId = response.headers.get('x-trace-id');
+        if (traceId) pendingTraceIdRef.current = traceId;
+        return response;
+      },
+    }),
+  );
+
+  const { messages, sendMessage, status } = useChat({
+    transport: transportRef.current,
+    onFinish: ({ message }) => {
+      // Associate the pending trace ID with the completed message.
+      if (pendingTraceIdRef.current) {
+        traceIdMapRef.current.set(message.id, pendingTraceIdRef.current);
+        pendingTraceIdRef.current = null;
+      }
+    },
+  });
 
   const isLoading = status === 'submitted' || status === 'streaming';
 
@@ -70,6 +113,21 @@ export default function ChatPage() {
       e.preventDefault();
       handleSubmit();
     }
+  };
+
+  // SAN-32: log thumbs feedback to Langfuse via /api/feedback.
+  // Optimistic update — UI reflects selection immediately; the POST is fire-and-forget.
+  const handleFeedback = async (messageId: string, rating: 'up' | 'down') => {
+    const traceId = traceIdMapRef.current.get(messageId);
+    if (!traceId) return;
+
+    setRatings((prev) => new Map(prev).set(messageId, rating));
+
+    await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ traceId, score: rating === 'up' ? 1 : 0 }),
+    });
   };
 
   return (
@@ -190,6 +248,8 @@ export default function ChatPage() {
             }
 
             if (message.role === 'assistant') {
+              const rating = ratings.get(message.id);
+
               return (
                 <Box key={message.id} sx={{ mb: 3 }}>
                   {/* AgentMessage handles streaming cursor, citation card parsing,
@@ -199,7 +259,51 @@ export default function ChatPage() {
                     isStreaming={isStreamingThisMessage}
                     onSuggestedClick={handleCardClick}
                   />
-                  {/* Thumbs up/down feedback controls added in SAN-32 */}
+
+                  {/* Thumbs up/down — only shown once streaming is complete.
+                      Selected icon fills; unselected dims. Selection can be changed. */}
+                  {!isStreamingThisMessage && (
+                    <Box sx={{ display: 'flex', gap: 0.5, mt: 1 }}>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleFeedback(message.id, 'up')}
+                        aria-label="Thumbs up"
+                        sx={{
+                          color:
+                            rating === 'up'
+                              ? '#2A7F7F'
+                              : rating === 'down'
+                                ? 'text.disabled'
+                                : 'text.secondary',
+                        }}
+                      >
+                        {rating === 'up' ? (
+                          <ThumbUpIcon fontSize="small" />
+                        ) : (
+                          <ThumbUpOutlinedIcon fontSize="small" />
+                        )}
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleFeedback(message.id, 'down')}
+                        aria-label="Thumbs down"
+                        sx={{
+                          color:
+                            rating === 'down'
+                              ? 'error.main'
+                              : rating === 'up'
+                                ? 'text.disabled'
+                                : 'text.secondary',
+                        }}
+                      >
+                        {rating === 'down' ? (
+                          <ThumbDownIcon fontSize="small" />
+                        ) : (
+                          <ThumbDownOutlinedIcon fontSize="small" />
+                        )}
+                      </IconButton>
+                    </Box>
+                  )}
                 </Box>
               );
             }
