@@ -1,18 +1,24 @@
 'use client';
 
-// ChatPage is the root UI component for the entire v1 product.
-// It owns the page layout (header, scrollable thread, pinned input) and the
-// onboarding card state. Streaming and message sending are implemented in SAN-30.
+// ChatPage — full chat layout with live streaming.
 //
-// State managed here:
-//   inputValue    — controlled value for the chat TextField
-//   hasSubmitted  — true after the user's first submission; hides onboarding cards permanently
+// State:
+//   useChat (from @ai-sdk/react) — messages, sendMessage, status
+//   inputValue (local) — controlled TextField value
+//
+// Message rendering is plain text for now. CASE_REF citation markers and
+// SUGGESTED inline links are parsed and rendered as components in SAN-31.
+//
+// Thumbs up/down feedback controls are added in SAN-32.
 
-import { useState } from 'react';
+import { useChat } from '@ai-sdk/react';
+import { isTextUIPart } from 'ai';
+import { useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
+import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -26,25 +32,36 @@ const SUGGESTED_QUESTIONS = [
 ];
 
 export default function ChatPage() {
+  const { messages, sendMessage, status } = useChat();
   const [inputValue, setInputValue] = useState('');
-  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const threadRef = useRef<HTMLDivElement>(null);
 
-  // Populate the input field with a suggested question without auto-submitting,
-  // so the user can read and edit before sending.
+  const isLoading = status === 'submitted' || status === 'streaming';
+
+  // Only count user/assistant messages — system messages never appear client-side
+  // but we filter defensively.
+  const visibleMessages = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+  const hasMessages = visibleMessages.length > 0;
+
+  // Scroll thread to bottom whenever messages update or streaming adds new text.
+  useEffect(() => {
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   const handleCardClick = (question: string) => {
     setInputValue(question);
   };
 
-  // On first submission, permanently hide onboarding cards.
-  // Actual message sending and streaming are wired up in SAN-30.
   const handleSubmit = () => {
-    if (!inputValue.trim()) return;
-    setHasSubmitted(true);
+    if (!inputValue.trim() || isLoading) return;
+    sendMessage({ text: inputValue });
     setInputValue('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Enter sends; Shift+Enter inserts a newline
+    // Enter sends; Shift+Enter inserts newline
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -60,9 +77,7 @@ export default function ChatPage() {
         backgroundColor: 'background.default',
       }}
     >
-      {/* ── Header ─────────────────────────────────────────────────────────────
-          Product name only. No navigation, no user menu, no logo in v1.
-          Per UX direction: one line, minimal height. */}
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
       <Box
         component="header"
         sx={{
@@ -78,11 +93,11 @@ export default function ChatPage() {
         </Typography>
       </Box>
 
-      {/* ── Message thread ─────────────────────────────────────────────────────
-          Scrollable. Content is max 800px centered to prevent unreadable line
-          lengths on wide screens. Message bubbles and agent responses are added
-          here in SAN-30. */}
+      {/* ── Message thread ───────────────────────────────────────────────────
+          Scrollable. Max 800px centered. Onboarding cards shown until first
+          message. Messages grow downward. */}
       <Box
+        ref={threadRef}
         sx={{
           flex: 1,
           overflowY: 'auto',
@@ -95,11 +110,8 @@ export default function ChatPage() {
       >
         <Box sx={{ width: '100%', maxWidth: '800px' }}>
 
-          {/* Onboarding cards — visible only before first message submission.
-              Cards are displayed in a column, max 600px wide, centered in the
-              thread area. Each card contains a full suggested question.
-              Per UX direction: no carousel, no horizontal scroll on mobile. */}
-          {!hasSubmitted && (
+          {/* Onboarding cards — hidden permanently after first submission */}
+          {!hasMessages && (
             <Box
               sx={{
                 display: 'flex',
@@ -118,9 +130,7 @@ export default function ChatPage() {
                     border: '1px solid #E0E0E0',
                     backgroundColor: 'background.paper',
                     transition: 'border-color 0.15s',
-                    '&:hover': {
-                      borderColor: 'primary.main',
-                    },
+                    '&:hover': { borderColor: 'primary.main' },
                   }}
                 >
                   <CardActionArea onClick={() => handleCardClick(question)}>
@@ -135,14 +145,106 @@ export default function ChatPage() {
             </Box>
           )}
 
+          {/* Message list */}
+          {visibleMessages.map((message, index) => {
+            // Concatenate all text parts — in v1 there is only one text part per
+            // message, but we join defensively.
+            const text = message.parts
+              .filter(isTextUIPart)
+              .map((p) => p.text)
+              .join('');
+
+            // Show streaming cursor on the last assistant message while streaming.
+            const isStreamingThisMessage =
+              status === 'streaming' &&
+              message.role === 'assistant' &&
+              index === visibleMessages.length - 1;
+
+            if (message.role === 'user') {
+              return (
+                <Box
+                  key={message.id}
+                  sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2.5 }}
+                >
+                  <Box
+                    sx={{
+                      backgroundColor: '#F0F0F0',
+                      borderRadius: 2,
+                      px: 2,
+                      py: 1.5,
+                      maxWidth: '75%',
+                    }}
+                  >
+                    <Typography
+                      sx={{ fontSize: '15px', color: 'text.primary', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}
+                    >
+                      {text}
+                    </Typography>
+                  </Box>
+                </Box>
+              );
+            }
+
+            if (message.role === 'assistant') {
+              return (
+                <Box key={message.id} sx={{ mb: 3 }}>
+                  {/* Agent response body — left-aligned, white background, no bubble.
+                      CASE_REF citation markers render as raw text here; SAN-31 adds
+                      the inline card parser. */}
+                  <Typography
+                    sx={{
+                      fontSize: '15px',
+                      color: 'text.primary',
+                      lineHeight: 1.6,
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {text}
+                    {/* Streaming cursor — visible only while this message is actively
+                        streaming. Replaced by the final text once streaming ends. */}
+                    {isStreamingThisMessage && (
+                      <Box
+                        component="span"
+                        sx={{
+                          display: 'inline-block',
+                          width: '2px',
+                          height: '1em',
+                          backgroundColor: 'text.primary',
+                          ml: '1px',
+                          verticalAlign: 'text-bottom',
+                          animation: 'blink 1s step-end infinite',
+                          '@keyframes blink': {
+                            '0%, 100%': { opacity: 1 },
+                            '50%': { opacity: 0 },
+                          },
+                        }}
+                      />
+                    )}
+                  </Typography>
+                  {/* Thumbs up/down feedback controls added in SAN-32 */}
+                </Box>
+              );
+            }
+
+            return null;
+          })}
+
+          {/* Submitted-but-not-yet-streaming indicator — shows between the user
+              message appearing and the first streaming token arriving. */}
+          {status === 'submitted' && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+              <CircularProgress size={14} thickness={5} sx={{ color: 'primary.main' }} />
+              <Typography sx={{ fontSize: '13px', color: 'text.secondary' }}>
+                Retrieving cases…
+              </Typography>
+            </Box>
+          )}
+
         </Box>
       </Box>
 
-      {/* ── Chat input ─────────────────────────────────────────────────────────
-          Pinned to bottom, always visible. Max width 800px centered.
-          TextField: multiline, maxRows=6, outlined.
-          Send button: MUI IconButton with SendIcon, inside the input row.
-          Keyboard: Enter sends, Shift+Enter creates newline. */}
+      {/* ── Chat input ───────────────────────────────────────────────────────
+          Pinned to bottom. Disabled while loading to prevent double-sends. */}
       <Box
         sx={{
           borderTop: '1px solid #E0E0E0',
@@ -170,15 +272,16 @@ export default function ChatPage() {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
+            disabled={isLoading}
             placeholder="Describe your CPR project — resource type, technology, community context, geography..."
           />
           <IconButton
             onClick={handleSubmit}
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() || isLoading}
             aria-label="Send message"
             sx={{
               mb: 0.5,
-              color: inputValue.trim() ? 'primary.main' : 'text.secondary',
+              color: inputValue.trim() && !isLoading ? 'primary.main' : 'text.secondary',
             }}
           >
             <SendIcon />
