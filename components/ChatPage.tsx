@@ -6,8 +6,9 @@
 //   useChat (from @ai-sdk/react) — messages, sendMessage, status
 //   inputValue (local) — controlled TextField value
 //
-// Message rendering is plain text for now. CASE_REF citation markers and
-// SUGGESTED inline links are parsed and rendered as components in SAN-31.
+// Agent responses are parsed and rendered by AgentMessage (SAN-31):
+//   [CASE_REF:] markers → CaseCitationCard components inline
+//   [SUGGESTED:] markers → plain text links that populate the input
 //
 // Thumbs up/down feedback controls are added in SAN-32.
 
@@ -23,12 +24,15 @@ import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import SendIcon from '@mui/icons-material/Send';
+import AgentMessage from './AgentMessage';
 
-// Suggested questions sourced from design-vision-2026-03-25.md (Design Director).
+// Suggested questions from ux-direction-core-chat-agent-2026-03-26.md (Design Director).
+// These are designed prompts that teach the researcher what to ask — not placeholder text.
 const SUGGESTED_QUESTIONS = [
-  'What governance risks should I consider for a sensor network in an irrigation collective?',
-  'Are there cases where technology undermined community autonomy in fisheries management?',
-  'What does the evidence say about mobile data collection in indigenous land management?',
+  'What governance risks should I anticipate when introducing sensor-based water monitoring in an irrigator community with informal tenure arrangements?',
+  'Are there cases where digital data collection undermined collective decision-making in fisheries or forest governance? What went wrong?',
+  "We're advising an irrigation collective considering a shared IoT platform. What does the evidence say about technology ownership and control risks in similar settings?",
+  'What conditions have allowed technology to strengthen — rather than erode — community governance in CPR contexts? I\'m looking for patterns across cases.',
 ];
 
 export default function ChatPage() {
@@ -188,39 +192,13 @@ export default function ChatPage() {
             if (message.role === 'assistant') {
               return (
                 <Box key={message.id} sx={{ mb: 3 }}>
-                  {/* Agent response body — left-aligned, white background, no bubble.
-                      CASE_REF citation markers render as raw text here; SAN-31 adds
-                      the inline card parser. */}
-                  <Typography
-                    sx={{
-                      fontSize: '15px',
-                      color: 'text.primary',
-                      lineHeight: 1.6,
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    {text}
-                    {/* Streaming cursor — visible only while this message is actively
-                        streaming. Replaced by the final text once streaming ends. */}
-                    {isStreamingThisMessage && (
-                      <Box
-                        component="span"
-                        sx={{
-                          display: 'inline-block',
-                          width: '2px',
-                          height: '1em',
-                          backgroundColor: 'text.primary',
-                          ml: '1px',
-                          verticalAlign: 'text-bottom',
-                          animation: 'blink 1s step-end infinite',
-                          '@keyframes blink': {
-                            '0%, 100%': { opacity: 1 },
-                            '50%': { opacity: 0 },
-                          },
-                        }}
-                      />
-                    )}
-                  </Typography>
+                  {/* AgentMessage handles streaming cursor, citation card parsing,
+                      and suggested-link rendering (SAN-31). */}
+                  <AgentMessage
+                    text={text}
+                    isStreaming={isStreamingThisMessage}
+                    onSuggestedClick={handleCardClick}
+                  />
                   {/* Thumbs up/down feedback controls added in SAN-32 */}
                 </Box>
               );
