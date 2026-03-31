@@ -39,12 +39,12 @@ export async function POST(req: Request) {
   // This captures model, input, output, and token usage in Langfuse.
   const generation = trace.generation({
     name: 'agent-response',
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.5-flash',
     input: modelMessages,
   });
 
   const result = streamText({
-    model: google('gemini-1.5-flash'),
+    model: google('gemini-2.5-flash'),
     system: systemPrompt,
     messages: modelMessages,
     onFinish: async ({ text, usage }) => {
